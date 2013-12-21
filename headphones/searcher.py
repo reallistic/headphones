@@ -15,6 +15,9 @@
 
 # NZBGet support added by CurlyMo <curlymoo1@gmail.com> as a part of XBian - XBMC on the Raspberry Pi
 
+# This file needs to be majorly cleaned up. There's so much redundant code. Needs to be
+# put into classes and organized
+
 import urllib, urllib2, urlparse, httplib
 import lib.feedparser as feedparser
 from bs4 import BeautifulSoup
@@ -43,7 +46,6 @@ rutracker = rutrackersearch.Rutracker()
 
 # Persistent What.cd API object
 gazelle = None
-
 
 class NewzbinDownloader(urllib.FancyURLopener):
 
@@ -109,6 +111,12 @@ httplib.HTTPResponse.read = patch_http_response_read(httplib.HTTPResponse.read)
 
 def searchforalbum(albumid=None, new=False, lossless=False):
 
+    # If adding new providers, make sure to also add it to the processAggregateResults function
+    nzb_providers = (headphones.HEADPHONES_INDEXER or headphones.NEWZNAB or headphones.NZBSORG or headphones.NZBSRUS or headphones.OMGWTFNZBS)
+    torrent_providers = (headphones.KAT or headphones.PIRATEBAY or headphones.ISOHUNT or headphones.MININOVA or headphones.WAFFLES or headphones.RUTRACKER or headphones.WHATCD)
+
+    nzb_downloaders = (headphones.SAB_HOST or headphones.BLACKHOLE_DIR or headphones.NZBGET_HOST)
+
     if not albumid:
 
         myDB = db.DBConnection()
@@ -117,33 +125,84 @@ def searchforalbum(albumid=None, new=False, lossless=False):
         new = True
 
         for result in results:
-            foundNZB = "none"
-            if (headphones.HEADPHONES_INDEXER or headphones.NEWZNAB or headphones.NZBSORG or headphones.NZBSRUS or headphones.OMGWTFNZBS) and (headphones.SAB_HOST or headphones.BLACKHOLE_DIR or headphones.NZBGET_HOST):
-                if result['Status'] == "Wanted Lossless":
-                    foundNZB = searchNZB(result['AlbumID'], new, losslessOnly=True)
-                else:
-                    foundNZB = searchNZB(result['AlbumID'], new)
+        
+            if headphones.PREFER_TORRENTS == 0:
+                foundNZB = "none"
+                if nzb_providers and nzb_downloaders:
+                    if result['Status'] == "Wanted Lossless":
+                        foundNZB = searchNZB(result['AlbumID'], new, losslessOnly=True)
+                    else:
+                        foundNZB = searchNZB(result['AlbumID'], new)
 
-            if (headphones.KAT or headphones.PIRATEBAY or headphones.ISOHUNT or headphones.MININOVA or headphones.WAFFLES or headphones.RUTRACKER or headphones.WHATCD) and foundNZB == "none":
+                if torrent_providers and foundNZB == "none":
 
-                if result['Status'] == "Wanted Lossless":
-                    searchTorrent(result['AlbumID'], new, losslessOnly=True)
-                else:
-                    searchTorrent(result['AlbumID'], new)
+                    if result['Status'] == "Wanted Lossless":
+                        searchTorrent(result['AlbumID'], new, losslessOnly=True)
+                    else:
+                        searchTorrent(result['AlbumID'], new)
+                        
+            elif headphones.PREFER_TORRENTS == 1:
+                foundTorrent = "none"
+                if torrent_providers:
+                    if result['Status'] == "Wanted Lossless":
+                        foundTorrent = searchTorrent(result['AlbumID'], new, losslessOnly=True)
+                    else:
+                        foundTorrent = searchTorrent(result['AlbumID'], new)
+                if nzb_providers and nzb_downloaders and foundTorrent="none":
+                    if result['Status'] == "Wanted Lossless":
+                        searchNZB(result['AlbumID'], new, losslessOnly=True)
+                    else:
+                        searchNZB(result['AlbumID'], new)
+                        
+            else:
+                if nzb_providers and nzb_downloaders:
+                    if result['Status'] == "Wanted Lossless":
+                        nzbresults = searchNZB(result['AlbumID'], new, losslessOnly=True, aggregate=True)
+                    else:
+                        nzbresults = searchNZB(result['AlbumID'], new, aggregate=True)
 
+                if torrent_providers:
+
+                    if result['Status'] == "Wanted Lossless":
+                        torrentresults = searchTorrent(result['AlbumID'], new, losslessOnly=True, aggregate=True)
+                    else:
+                        torrentresults = searchTorrent(result['AlbumID'], new, aggregate=True)
+
+                    processAggregateResults(nzbresults, torrentresults, new)
     else:
 
-        foundNZB = "none"
+        if headphones.PREFER_TORRENTS == 0:
+            foundNZB = "none"
         
-        if (headphones.HEADPHONES_INDEXER or headphones.NEWZNAB or headphones.NZBSORG or headphones.NZBSRUS or headphones.OMGWTFNZBS) and (headphones.SAB_HOST or headphones.BLACKHOLE_DIR or headphones.NZBGET_HOST):
-            foundNZB = searchNZB(albumid, new, lossless)
+            if nzb_providers and nzb_downloaders:
+                foundNZB = searchNZB(albumid, new, lossless)
 
-        if (headphones.KAT or headphones.PIRATEBAY or headphones.ISOHUNT or headphones.MININOVA or headphones.WAFFLES or headphones.RUTRACKER or headphones.WHATCD) and foundNZB == "none":
-            searchTorrent(albumid, new, lossless)
+            if torrent_providers and foundNZB == "none":
+                searchTorrent(albumid, new, lossless)
+
+        elif headphones.PREFER_TORRENTS == 1:
+            foundTorrent = "none"
+            
+            if torrent_providers:
+                foundTorrent = searchTorrent(albumid, new, lossless)
+        
+            if nzb_providers and nzb_downloaders and foundTorrent="none":
+                searchNZB(albumid, new, lossless)
+                
+        else:
+            if nzb_providers and nzb_downloaders:
+                nzbresults = searchNZB(albumid, new, lossless, aggregate=True)
+
+            if torrent_providers:
+                torrentresults = searchTorrent(albumid, new, lossless, aggregate=True)
+
+            processAggregateResults(nzbresults, torrentresults, new)
+                
 
     logger.info('Search for Wanted albums complete')
+
     
-def searchNZB(albumid=None, new=False, losslessOnly=False):
+def searchNZB(albumid=None, new=False, losslessOnly=False, aggregate=True):
 
     myDB = db.DBConnection()
 
@@ -507,104 +566,14 @@ def searchNZB(albumid=None, new=False, losslessOnly=False):
 
         if len(resultlist):
             resultlist[:] = [result for result in resultlist if verifyresult(result[0], artistterm, term, losslessOnly)]
+            
+        # If we're trying to find the best result out of both torrents and nzbs, let's bail out here
+        if aggregate:
+            return resultlist
 
         if len(resultlist):
-
-            # Add a priority if it has any of the preferred words
-            temp_list = []
-            for result in resultlist:
-                if headphones.PREFERRED_WORDS and any(word.lower() in result[0].lower() for word in helpers.split_string(headphones.PREFERRED_WORDS)):
-                    temp_list.append((result[0],result[1],result[2],result[3],1))
-                else:
-                    temp_list.append((result[0],result[1],result[2],result[3],0))
-
-            resultlist = temp_list
-
-            if headphones.PREFERRED_QUALITY == 2 and headphones.PREFERRED_BITRATE:
-
-                logger.debug('Target bitrate: %s kbps' % headphones.PREFERRED_BITRATE)
-
-                tracks = myDB.select('SELECT TrackDuration from tracks WHERE AlbumID=?', [albumid])
-
-                try:
-                    albumlength = sum([pair[0] for pair in tracks])
-
-                    targetsize = albumlength/1000 * int(headphones.PREFERRED_BITRATE) * 128
-
-                    if not targetsize:
-                        logger.info('No track information for %s - %s. Defaulting to highest quality' % (albums[0], albums[1]))
-                        nzblist = sorted(resultlist, key=lambda title: (title[4], int(title[1])), reverse=True)
-
-                    else:
-                        logger.info('Target size: %s' % helpers.bytes_to_mb(targetsize))
-                        newlist = []
-                        flac_list = []
-
-                        if headphones.PREFERRED_BITRATE_HIGH_BUFFER:
-                            high_size_limit = targetsize * int(headphones.PREFERRED_BITRATE_HIGH_BUFFER)/100
-                        else:
-                            high_size_limit = None
-                        if headphones.PREFERRED_BITRATE_LOW_BUFFER:
-                            low_size_limit = targetsize * int(headphones.PREFERRED_BITRATE_LOW_BUFFER)/100
-                        else:
-                            low_size_limit = None
-
-                        for result in resultlist:
-
-                            if high_size_limit and (result[1] > high_size_limit):
-
-                                logger.info(result[0] + " is too large for this album - not considering it. (Size: " + helpers.bytes_to_mb(result[1]) + ", Maxsize: " + helpers.bytes_to_mb(high_size_limit) + ")")
-
-                                # Add lossless nzbs to the "flac list" which we can use if there are no good lossy matches
-                                if 'flac' in result[0].lower():
-                                    flac_list.append((result[0], result[1], result[2], result[3], result[4]))
-
-                                continue
-
-                            if low_size_limit and (result[1] < low_size_limit):
-                                logger.info(result[0] + " is too small for this album - not considering it. (Size: " + helpers.bytes_to_mb(result[1]) + ", Minsize: " + helpers.bytes_to_mb(low_size_limit) + ")")
-                                continue
-
-                            delta = abs(targetsize - int(result[1]))
-                            newlist.append((result[0], result[1], result[2], result[3], result[4], delta))
-
-                        nzblist = sorted(newlist, key=lambda title: (-title[4], title[5]))
-
-                        if not len(nzblist) and len(flac_list) and headphones.PREFERRED_BITRATE_ALLOW_LOSSLESS:
-                            logger.info("Since there were no appropriate lossy matches (and at least one lossless match), going to use lossless instead")
-                            nzblist = sorted(flac_list, key=lambda title: (title[4], int(title[1])), reverse=True)
-
-                except Exception, e:
-
-                    logger.debug('Error: %s' % str(e))
-                    logger.info('No track information for %s - %s. Defaulting to highest quality' % (albums[0], albums[1]))
-
-                    nzblist = sorted(resultlist, key=lambda title: (title[4], int(title[1])), reverse=True)
-
-
-            else:
-
-                nzblist = sorted(resultlist, key=lambda title: (title[4], int(title[1])), reverse=True)
-
-
-
-            if new:
-
-                while True:
-
-                    if len(nzblist):
-
-                        alreadydownloaded = myDB.select('SELECT * from snatched WHERE URL=?', [nzblist[0][2]])
-
-                        if len(alreadydownloaded):
-                            logger.info('%s has already been downloaded. Skipping.' % nzblist[0][0])
-                            nzblist.pop(0)
-
-                        else:
-                            break
-                    else:
-                        logger.info('No more results found for %s' % term)
-                        return "none"
+            
+            nzblist = sort_result_list(resultlist, new)
 
             if not len(nzblist):
                 logger.info('No appropriate matches found for %s' % term)
@@ -615,55 +584,12 @@ def searchNZB(albumid=None, new=False, losslessOnly=False):
             (data, bestqual) = preprocess(nzblist)
 
             if data and bestqual:
-                logger.info(u'Found best result: <a href="%s">%s</a> - %s' % (bestqual[2], bestqual[0], helpers.bytes_to_mb(bestqual[1])))
-                # Get rid of any dodgy chars here so we can prevent sab from renaming our downloads
-                nzb_folder_name = helpers.sab_sanitize_foldername(bestqual[0])
-                if headphones.NZB_DOWNLOADER == 1:
-
-                    nzb = classes.NZBDataSearchResult()
-                    nzb.extraInfo.append(data)
-                    nzb.name = nzb_folder_name
-                    nzbget.sendNZB(nzb)
-
-                elif headphones.NZB_DOWNLOADER == 0:
-
-                    nzb = classes.NZBDataSearchResult()
-                    nzb.extraInfo.append(data)
-                    nzb.name = nzb_folder_name
-                    sab.sendNZB(nzb)
-
-                    # If we sent the file to sab, we can check how it was renamed and insert that into the snatched table
-                    (replace_spaces, replace_dots) = sab.checkConfig()
-
-                    if replace_dots:
-                        nzb_folder_name = helpers.sab_replace_dots(nzb_folder_name)
-                    if replace_spaces:
-                        nzb_folder_name = helpers.sab_replace_spaces(nzb_folder_name)
-
-                else:
-
-                    nzb_name = nzb_folder_name + '.nzb'
-                    download_path = os.path.join(headphones.BLACKHOLE_DIR, nzb_name)
-                    try:
-                        prev = os.umask(headphones.UMASK)
-                        f = open(download_path, 'w')
-                        f.write(data)
-                        f.close()
-                        os.umask(prev)
-                        logger.info('File saved to: %s' % nzb_name)
-                    except Exception, e:
-                        logger.error('Couldn\'t write NZB file: %s' % e)
-                        break
-
-                myDB.action('UPDATE albums SET status = "Snatched" WHERE AlbumID=?', [albums[2]])
-                myDB.action('INSERT INTO snatched VALUES( ?, ?, ?, ?, DATETIME("NOW", "localtime"), ?, ?, ?)', [albums[2], bestqual[0], bestqual[1], bestqual[2], "Snatched", nzb_folder_name, "nzb"])
-                return "found"
+                response = send_to_downloader(data, bestqual, "nzb")
+                return response
             else:
                 return "none"
         else:
             return "none"
-
-
 
 def verifyresult(title, artistterm, term, lossless):
 
@@ -797,7 +723,217 @@ def preprocess(resultlist):
             logger.error("Couldn't retrieve the best nzb. Skipping.")
     return (False, False)
 
+def sort_result_list(resultlist, new):
 
+    # Sort a list of nzbs, torrents, or a combination of both from best to worst
+
+    # Add a priority if it has any of the preferred words
+    temp_list = []
+    for result in resultlist:
+        if headphones.PREFERRED_WORDS and any(word.lower() in result[0].lower() for word in helpers.split_string(headphones.PREFERRED_WORDS)):
+            temp_list.append((result[0],result[1],result[2],result[3],1))
+        else:
+            temp_list.append((result[0],result[1],result[2],result[3],0))
+
+    resultlist = temp_list
+
+    if headphones.PREFERRED_QUALITY == 2 and headphones.PREFERRED_BITRATE:
+
+        logger.debug('Target bitrate: %s kbps' % headphones.PREFERRED_BITRATE)
+
+        tracks = myDB.select('SELECT TrackDuration from tracks WHERE AlbumID=?', [albumid])
+
+        try:
+            albumlength = sum([pair[0] for pair in tracks])
+
+            targetsize = albumlength/1000 * int(headphones.PREFERRED_BITRATE) * 128
+
+            if not targetsize:
+                logger.info('No track information for %s - %s. Defaulting to highest quality' % (albums[0], albums[1]))
+                resultlist = sorted(resultlist, key=lambda title: (title[4], int(title[1])), reverse=True)
+                return resultlist
+
+            else:
+                logger.info('Target size: %s' % helpers.bytes_to_mb(targetsize))
+                newlist = []
+                flac_list = []
+
+                if headphones.PREFERRED_BITRATE_HIGH_BUFFER:
+                    high_size_limit = targetsize * int(headphones.PREFERRED_BITRATE_HIGH_BUFFER)/100
+                else:
+                    high_size_limit = None
+                if headphones.PREFERRED_BITRATE_LOW_BUFFER:
+                    low_size_limit = targetsize * int(headphones.PREFERRED_BITRATE_LOW_BUFFER)/100
+                else:
+                    low_size_limit = None
+
+                for result in resultlist:
+
+                    if high_size_limit and (result[1] > high_size_limit):
+
+                        logger.info(result[0] + " is too large for this album - not considering it. (Size: " + helpers.bytes_to_mb(result[1]) + ", Maxsize: " + helpers.bytes_to_mb(high_size_limit) + ")")
+
+                        # Add lossless nzbs to the "flac list" which we can use if there are no good lossy matches
+                        if 'flac' in result[0].lower():
+                            flac_list.append((result[0], result[1], result[2], result[3], result[4]))
+
+                        continue
+
+                    if low_size_limit and (result[1] < low_size_limit):
+                        logger.info(result[0] + " is too small for this album - not considering it. (Size: " + helpers.bytes_to_mb(result[1]) + ", Minsize: " + helpers.bytes_to_mb(low_size_limit) + ")")
+                        continue
+
+                    delta = abs(targetsize - int(result[1]))
+                    newlist.append((result[0], result[1], result[2], result[3], result[4], delta))
+
+                resultlist = sorted(newlist, key=lambda title: (-title[4], title[5]))
+
+                if not len(resultlist) and len(flac_list) and headphones.PREFERRED_BITRATE_ALLOW_LOSSLESS:
+                    logger.info("Since there were no appropriate lossy matches (and at least one lossless match), going to use lossless instead")
+                    resultlist = sorted(flac_list, key=lambda title: (title[4], int(title[1])), reverse=True)
+
+        except Exception, e:
+
+            logger.debug('Error: %s' % str(e))
+            logger.info('No track information for %s - %s. Defaulting to highest quality' % (albums[0], albums[1]))
+
+            resultlist = sorted(resultlist, key=lambda title: (title[4], int(title[1])), reverse=True)
+
+    else:
+
+        resultlist = sorted(resultlist, key=lambda title: (title[4], int(title[1])), reverse=True)
+        
+    if new:
+
+        while True:
+
+            if len(resultlist):
+
+                alreadydownloaded = myDB.select('SELECT * from snatched WHERE URL=?', [resultlist[0][2]])
+
+                if len(alreadydownloaded):
+                    logger.info('%s has already been downloaded. Skipping.' % resultlist[0][0])
+                    resultlist.pop(0)
+
+                else:
+                    break
+            else:
+                logger.info('No more results found for %s' % term)
+                return
+                
+    return resultlist
+        
+def send_to_downloader(data, bestqual, type):
+
+    logger.info(u'Found best result: <a href="%s">%s</a> - %s' % (bestqual[2], bestqual[0], helpers.bytes_to_mb(bestqual[1])))
+    
+    if type == "nzb":
+        # Get rid of any dodgy chars here so we can prevent sab from renaming our downloads
+        nzb_folder_name = helpers.sab_sanitize_foldername(bestqual[0])
+        if headphones.NZB_DOWNLOADER == 1:
+
+            nzb = classes.NZBDataSearchResult()
+            nzb.extraInfo.append(data)
+            nzb.name = nzb_folder_name
+            nzbget.sendNZB(nzb)
+
+        elif headphones.NZB_DOWNLOADER == 0:
+
+            nzb = classes.NZBDataSearchResult()
+            nzb.extraInfo.append(data)
+            nzb.name = nzb_folder_name
+            sab.sendNZB(nzb)
+
+            # If we sent the file to sab, we can check how it was renamed and insert that into the snatched table
+            (replace_spaces, replace_dots) = sab.checkConfig()
+
+            if replace_dots:
+                nzb_folder_name = helpers.sab_replace_dots(nzb_folder_name)
+            if replace_spaces:
+                nzb_folder_name = helpers.sab_replace_spaces(nzb_folder_name)
+
+        else:
+
+            nzb_name = nzb_folder_name + '.nzb'
+            download_path = os.path.join(headphones.BLACKHOLE_DIR, nzb_name)
+            try:
+                prev = os.umask(headphones.UMASK)
+                f = open(download_path, 'w')
+                f.write(data)
+                f.close()
+                os.umask(prev)
+                logger.info('File saved to: %s' % nzb_name)
+            except Exception, e:
+                logger.error('Couldn\'t write NZB file: %s' % e)
+                break
+    else:
+    
+        torrent_folder_name = '%s - %s [%s]' % (helpers.latinToAscii(albums[0]).encode('UTF-8').replace('/', '_'), helpers.latinToAscii(albums[1]).encode('UTF-8').replace('/', '_'), year) 
+
+        # Blackhole
+        if headphones.TORRENT_DOWNLOADER == 0:
+            
+            if bestqual[2].startswith("magnet:"):
+                logger.error("Cannot save magnet files to blackhole. Please switch your torrent downloader to Transmission or uTorrent")
+                return
+        
+            # Get torrent name from .torrent, this is usually used by the torrent client as the folder name
+
+            torrent_name = torrent_folder_name + '.torrent'
+            download_path = os.path.join(headphones.TORRENTBLACKHOLE_DIR, torrent_name)
+            try:
+                if bestqual[3] == 'rutracker.org':
+                    download_path = rutracker.get_torrent(bestqual[2], headphones.TORRENTBLACKHOLE_DIR)
+                    if not download_path:
+                        break
+                else:
+                    #Write the torrent file to a path derived from the TORRENTBLACKHOLE_DIR and file name.
+                    prev = os.umask(headphones.UMASK)
+                    torrent_file = open(download_path, 'wb')
+                    torrent_file.write(data)
+                    torrent_file.close()
+                    os.umask(prev)
+
+                #Open the fresh torrent file again so we can extract the proper torrent name
+                #Used later in post-processing.
+                torrent_file = open(download_path, 'rb')
+                torrent_info = bencode.bdecode(torrent_file.read())
+                torrent_file.close()
+                torrent_folder_name = torrent_info['info'].get('name','').decode('utf-8')
+                logger.info('Torrent folder name: %s' % torrent_folder_name)
+            except Exception, e:
+                logger.error('Couldn\'t get name from Torrent file: %s' % e)
+                break
+                
+        elif headphones.TORRENT_DOWNLOADER == 1:
+            logger.info("Sending torrent to Transmission")
+
+            # rutracker needs cookies to be set, pass the .torrent file instead of url
+            if bestqual[3] == 'rutracker.org':
+                file_or_url = rutracker.get_torrent(bestqual[2])
+            else:
+                file_or_url = bestqual[2]
+
+            torrentid = transmission.addTorrent(file_or_url)
+            
+            if not torrentid:
+                logger.error("Error sending torrent to Transmission. Are you sure it's running?")
+                return
+                
+            torrent_folder_name = transmission.getTorrentFolder(torrentid)
+            logger.info('Torrent folder name: %s' % torrent_folder_name)
+
+            # remove temp .torrent file created above
+            if bestqual[3] == 'rutracker.org':
+                try:
+                    shutil.rmtree(os.path.split(file_or_url)[0])
+                except Exception, e:
+                    logger.warning('Couldn\'t remove temp dir %s' % e)
+
+                
+    myDB.action('UPDATE albums SET status = "Snatched" WHERE AlbumID=?', [albums[2]])
+    myDB.action('INSERT INTO snatched VALUES( ?, ?, ?, ?, DATETIME("NOW", "localtime"), ?, ?, ?)', [albums[2], bestqual[0], bestqual[1], bestqual[2], "Snatched", torrent_folder_name, type])
+    return "found"
 
 def searchTorrent(albumid=None, new=False, losslessOnly=False):
     global gazelle  # persistent what.cd api object to reduce number of login attempts
@@ -1367,173 +1503,27 @@ def searchTorrent(albumid=None, new=False, losslessOnly=False):
         #this should be less of an issue when it isn't a self-titled album so we'll only check vs artist
         if len(resultlist):
             resultlist[:] = [result for result in resultlist if verifyresult(result[0], artistterm, term, losslessOnly)]
+            
+        # If we're trying to find the best result out of both torrents and nzbs, let's bail out here
+        if aggregate:
+            return resultlist
 
         if len(resultlist):
-            
-            # Add a priority if it has any of the preferred words
-            temp_list = []
-            for result in resultlist:
-                if headphones.PREFERRED_WORDS and any(word.lower() in result[0].lower() for word in helpers.split_string(headphones.PREFERRED_WORDS)):
-                    temp_list.append((result[0],result[1],result[2],result[3],1))
-                else:
-                    temp_list.append((result[0],result[1],result[2],result[3],0))
-                        
-            resultlist = temp_list
-
-            if headphones.PREFERRED_QUALITY == 2 and headphones.PREFERRED_BITRATE:
-
-                logger.debug('Target bitrate: %s kbps' % headphones.PREFERRED_BITRATE)
-
-                tracks = myDB.select('SELECT TrackDuration from tracks WHERE AlbumID=?', [albumid])
-
-                try:
-                    albumlength = sum([pair[0] for pair in tracks])
-
-                    targetsize = albumlength/1000 * int(headphones.PREFERRED_BITRATE) * 128
-    
-                    if not targetsize:
-                        logger.info('No track information for %s - %s. Defaulting to highest quality' % (albums[0], albums[1]))
-                        torrentlist = sorted(resultlist, key=lambda title: (title[4], int(title[1])), reverse=True)
-                    
-                    else:
-                        logger.info('Target size: %s' % helpers.bytes_to_mb(targetsize))
-                        newlist = []
-                        flac_list = []
-                        
-                        if headphones.PREFERRED_BITRATE_HIGH_BUFFER:
-                            high_size_limit = targetsize * int(headphones.PREFERRED_BITRATE_HIGH_BUFFER)/100
-                        else:
-                            high_size_limit = None
-                        if headphones.PREFERRED_BITRATE_LOW_BUFFER:
-                            low_size_limit = targetsize * int(headphones.PREFERRED_BITRATE_LOW_BUFFER)/100
-                        else:
-                            low_size_limit = None
-                            
-                        for result in resultlist:
-                            
-                            if high_size_limit and (result[1] > high_size_limit):
-                                logger.info(result[0] + " is too large for this album - not considering it. (Size: " + helpers.bytes_to_mb(result[1]) + ", Maxsize: " + helpers.bytes_to_mb(high_size_limit) + ")")
-                                
-                                # Add lossless nzbs to the "flac list" which we can use if there are no good lossy matches
-                                if 'flac' in result[0].lower():
-                                    flac_list.append((result[0], result[1], result[2], result[3], result[4]))
-                                
-                                continue
-                                
-                            if low_size_limit and (result[1] < low_size_limit):
-                                logger.info(result[0] + " is too small for this album - not considering it. (Size: " + helpers.bytes_to_mb(result[1]) + ", Minsize: " + helpers.bytes_to_mb(low_size_limit) + ")")
-                                continue
-                                                                
-                            delta = abs(targetsize - int(result[1]))
-                            newlist.append((result[0], result[1], result[2], result[3], result[4], delta))
-
-                        torrentlist = sorted(newlist, key=lambda title: (-title[4], title[5]))
-                        
-                        if not len(torrentlist) and len(flac_list) and headphones.PREFERRED_BITRATE_ALLOW_LOSSLESS:
-                            logger.info("Since there were no appropriate lossy matches (and at least one lossless match), going to use lossless instead")
-                            torrentlist = sorted(flac_list, key=lambda title: (title[4], int(title[1])), reverse=True)
-                
-                except Exception, e:
-
-                    logger.debug('Error: %s' % str(e))
-                    logger.info('No track information for %s - %s. Defaulting to highest quality' % (albums[0], albums[1]))
-
-                    torrentlist = sorted(resultlist, key=lambda title: (title[4], int(title[1])), reverse=True)
-            
-            else:
-
-                torrentlist = sorted(resultlist, key=lambda title: (title[4], int(title[1])), reverse=True)
-
-            if new:
-
-                while True:
-
-                    if len(torrentlist):
-
-                        alreadydownloaded = myDB.select('SELECT * from snatched WHERE URL=?', [torrentlist[0][2]])
-
-                        if len(alreadydownloaded):
-                            logger.info('%s has already been downloaded. Skipping.' % torrentlist[0][0])
-                            torrentlist.pop(0)
-
-                        else:
-                            break
-                    else:
-                        logger.info('No more results found for %s' % term)
-                        return
+            torrentlist = sort_result_list(resultlist, new)
 
             logger.info(u"Pre-processing result")
 
             (data, bestqual) = preprocesstorrent(torrentlist, pre_sorted_results)
 
             if data and bestqual:
-                logger.info(u'Found best result from %s: <a href="%s">%s</a> - %s' % (bestqual[3], bestqual[2], bestqual[0], helpers.bytes_to_mb(bestqual[1])))
+                response = send_to_downloader(data, bestqual, "torrent")
+                return response
+            else:
+                return "none"
 
-                torrent_folder_name = '%s - %s [%s]' % (helpers.latinToAscii(albums[0]).encode('UTF-8').replace('/', '_'), helpers.latinToAscii(albums[1]).encode('UTF-8').replace('/', '_'), year) 
-
-                # Blackhole
-                if headphones.TORRENT_DOWNLOADER == 0:
-                    
-                    if bestqual[2].startswith("magnet:"):
-                        logger.error("Cannot save magnet files to blackhole. Please switch your torrent downloader to Transmission or uTorrent")
-                        return
-                
-                    # Get torrent name from .torrent, this is usually used by the torrent client as the folder name
-
-                    torrent_name = torrent_folder_name + '.torrent'
-                    download_path = os.path.join(headphones.TORRENTBLACKHOLE_DIR, torrent_name)
-                    try:
-                        if bestqual[3] == 'rutracker.org':
-                            download_path = rutracker.get_torrent(bestqual[2], headphones.TORRENTBLACKHOLE_DIR)
-                            if not download_path:
-                                break
-                        else:
-                            #Write the torrent file to a path derived from the TORRENTBLACKHOLE_DIR and file name.
-                            prev = os.umask(headphones.UMASK)
-                            torrent_file = open(download_path, 'wb')
-                            torrent_file.write(data)
-                            torrent_file.close()
-                            os.umask(prev)
-
-                        #Open the fresh torrent file again so we can extract the proper torrent name
-                        #Used later in post-processing.
-                        torrent_file = open(download_path, 'rb')
-                        torrent_info = bencode.bdecode(torrent_file.read())
-                        torrent_file.close()
-                        torrent_folder_name = torrent_info['info'].get('name','').decode('utf-8')
-                        logger.info('Torrent folder name: %s' % torrent_folder_name)
-                    except Exception, e:
-                        logger.error('Couldn\'t get name from Torrent file: %s' % e)
-                        break
-                        
-                elif headphones.TORRENT_DOWNLOADER == 1:
-                    logger.info("Sending torrent to Transmission")
-
-                    # rutracker needs cookies to be set, pass the .torrent file instead of url
-                    if bestqual[3] == 'rutracker.org':
-                        file_or_url = rutracker.get_torrent(bestqual[2])
-                    else:
-                        file_or_url = bestqual[2]
-
-                    torrentid = transmission.addTorrent(file_or_url)
-                    
-                    if not torrentid:
-                        logger.error("Error sending torrent to Transmission. Are you sure it's running?")
-                        return
-                        
-                    torrent_folder_name = transmission.getTorrentFolder(torrentid)
-                    logger.info('Torrent folder name: %s' % torrent_folder_name)
-
-                    # remove temp .torrent file created above
-                    if bestqual[3] == 'rutracker.org':
-                        try:
-                            shutil.rmtree(os.path.split(file_or_url)[0])
-                        except Exception, e:
-                            logger.warning('Couldn\'t remove temp dir %s' % e)
-
-                myDB.action('UPDATE albums SET status = "Snatched" WHERE AlbumID=?', [albums[2]])
-                myDB.action('INSERT INTO snatched VALUES( ?, ?, ?, ?, DATETIME("NOW", "localtime"), ?, ?, ?)', [albums[2], bestqual[0], bestqual[1], bestqual[2], "Snatched", torrent_folder_name, "torrent"])
-
+        else:
+            return "none"
+            
 def preprocesstorrent(resultlist, pre_sorted_list=False):
 
     # Get out of here if we're using Transmission or uTorrent
@@ -1565,3 +1555,19 @@ def preprocesstorrent(resultlist, pre_sorted_list=False):
             continue
 
         return torrent, result
+        
+def processAggregateResults(nzbresults, torrentresults, new):
+
+    combined_results = nzbresults + torrentresults
+    sorted_result_list = sort_result_list(combined_results, new)
+    
+    logger.info(u"Pre-processing result")
+
+    (data, bestqual) = preprocesstorrent(torrentlist, pre_sorted_results)
+
+    if data and bestqual:
+        response = send_to_downloader(data, bestqual, "torrent")
+        return response
+    else:
+        return "none"
+    
