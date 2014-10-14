@@ -17,13 +17,13 @@
 ## Stolen from Sick-Beard's sab.py ##
 #####################################
 
-import urllib, httplib
-import datetime
-
+import MultipartPostHandler
 import headphones
-
-from lib import MultipartPostHandler
-import urllib2, cookielib
+import datetime
+import cookielib
+import urllib2
+import httplib
+import urllib
 import ast
 
 from headphones.common import USER_AGENT
@@ -62,14 +62,14 @@ def sendNZB(nzb):
         # Sanitize the file a bit, since we can only use ascii chars with MultiPartPostHandler
         nzbdata = helpers.latinToAscii(nzb.extraInfo[0])
         params['mode'] = 'addfile'
-        multiPartParams = {"nzbfile": (nzb.name+".nzb", nzbdata)}
+        multiPartParams = {"nzbfile": (helpers.latinToAscii(nzb.name)+".nzb", nzbdata)}
 
     if not headphones.SAB_HOST.startswith('http'):
         headphones.SAB_HOST = 'http://' + headphones.SAB_HOST
 
     if headphones.SAB_HOST.endswith('/'):
         headphones.SAB_HOST = headphones.SAB_HOST[0:len(headphones.SAB_HOST)-1]
-    
+
     url = headphones.SAB_HOST + "/" + "api?" + urllib.urlencode(params)
 
     try:
@@ -119,19 +119,6 @@ def sendNZB(nzb):
 
     if sabText == "ok":
         logger.info(u"NZB sent to SAB successfully")
-        if headphones.PROWL_ENABLED and headphones.PROWL_ONSNATCH:
-            logger.info(u"Sending Prowl notification")
-            prowl = notifiers.PROWL()
-            prowl.notify(nzb.name,"Download started")
-        if headphones.PUSHOVER_ENABLED and headphones.PUSHOVER_ONSNATCH:
-            logger.info(u"Sending Pushover notification")
-            prowl = notifiers.PUSHOVER()
-            prowl.notify(nzb.name,"Download started")
-        if headphones.NMA_ENABLED and headphones.NMA_ONSNATCH:
-            logger.debug(u"Sending NMA notification")
-            nma = notifiers.NMA()
-            nma.notify(snatched_nzb=nzb.name)
-
         return True
     elif sabText == "Missing authentication":
         logger.info(u"Incorrect username/password sent to SAB, NZB not sent")

@@ -14,26 +14,30 @@
 #  You should have received a copy of the GNU General Public License
 #  along with Headphones.  If not, see <http://www.gnu.org/licenses/>.
 
-import os, sys, locale
-import time
-import signal
+import os, sys
 
-from lib.configobj import ConfigObj
-
-import headphones
+# Ensure lib added to path, before any other imports
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'lib/'))
 
 from headphones import webstart, logger
 
-try:
-    import argparse
-except ImportError:
-    import lib.argparse as argparse
+from configobj import ConfigObj
 
+import locale
+import time
+import signal
+import argparse
+import headphones
+
+# Register signals, such as CTRL + C
 signal.signal(signal.SIGINT, headphones.sig_handler)
 signal.signal(signal.SIGTERM, headphones.sig_handler)
 
-
 def main():
+    """
+    Headphones application entry point. Parses arguments, setups encoding and
+    initializes the application.
+    """
 
     # Fixed paths to Headphones
     if hasattr(sys, 'frozen'):
@@ -59,7 +63,7 @@ def main():
         headphones.SYS_ENCODING = 'UTF-8'
 
     # Set up and gather command line arguments
-    parser = argparse.ArgumentParser(description='Music add-on for SABnzbd+')
+    parser = argparse.ArgumentParser(description='Music add-on for SABnzbd+, Transmission and more.')
 
     parser.add_argument('-v', '--verbose', action='store_true', help='Increase console logging verbosity')
     parser.add_argument('-q', '--quiet', action='store_true', help='Turn off console logging')
@@ -73,16 +77,16 @@ def main():
     args = parser.parse_args()
 
     if args.verbose:
-        headphones.VERBOSE = 2
-    elif args.quiet:
-        headphones.VERBOSE = 0
+        headphones.VERBOSE = True
+    if args.quiet:
+        headphones.QUIET = True
 
     if args.daemon:
         if sys.platform == 'win32':
-            print "Daemonize not supported under Windows, starting normally"
+            sys.stderr.write("Daemonizing not supported under Windows, starting normally\n")
         else:
-            headphones.DAEMON=True
-            headphones.VERBOSE = False
+            headphones.DAEMON = True
+            headphones.QUIET = True
 
     if args.pidfile:
         headphones.PIDFILE = str(args.pidfile)
@@ -94,13 +98,16 @@ def main():
         # The pidfile is only useful in daemon mode, make sure we can write the file properly
         if headphones.DAEMON:
             headphones.CREATEPID = True
+
             try:
-                file(headphones.PIDFILE, 'w').write("pid\n")
-            except IOError, e:
-                raise SystemExit("Unable to write PID file: %s [%d]" % (e.strerror, e.errno))
+                with open(headphones.PIDFILE, 'w') as fp:
+                    fp.write("pid\n")
+            except IOError as e:
+                raise SystemExit("Unable to write PID file: %s [%d]", e.strerror, e.errno)
         else:
             logger.warn("Not running in daemon mode. PID file creation disabled.")
 
+    # Determine which data directory and config file to use
     if args.datadir:
         headphones.DATA_DIR = args.datadir
     else:
@@ -124,47 +131,45 @@ def main():
 
     # Put the database in the DATA_DIR
     headphones.DB_FILE = os.path.join(headphones.DATA_DIR, 'headphones.db')
-
     headphones.CFG = ConfigObj(headphones.CONFIG_FILE, encoding='utf-8')
 
-    # Read config & start logging
+    # Read config and start logging
     headphones.initialize()
 
     if headphones.DAEMON:
-        if sys.platform == "win32":
-            print "Daemonize not supported under Windows, starting normally"
-        else:
-            headphones.daemonize()
+        headphones.daemonize()
 
-    #configure the connection to the musicbrainz database
+    # Configure the connection to the musicbrainz database
     headphones.mb.startmb()
 
     # Force the http port if neccessary
     if args.port:
         http_port = args.port
-        logger.info('Using forced port: %i' % http_port)
+        logger.info('Using forced web server port: %i', http_port)
     else:
         http_port = int(headphones.HTTP_PORT)
 
-    # Try to start the server.
+    # Try to start the server. Will exit here is address is already in use.
     webstart.initialize({
-                    'http_port':        http_port,
-                    'http_host':        headphones.HTTP_HOST,
-                    'http_root':        headphones.HTTP_ROOT,
-                    'http_proxy':       headphones.HTTP_PROXY,
-                    'enable_https':     headphones.ENABLE_HTTPS,
-                    'https_cert':       headphones.HTTPS_CERT,
-                    'https_key':        headphones.HTTPS_KEY,
-                    'http_username':    headphones.HTTP_USERNAME,
-                    'http_password':    headphones.HTTP_PASSWORD,
-            })
+        'http_port': http_port,
+        'http_host': headphones.HTTP_HOST,
+        'http_root': headphones.HTTP_ROOT,
+        'http_proxy': headphones.HTTP_PROXY,
+        'enable_https': headphones.ENABLE_HTTPS,
+        'https_cert': headphones.HTTPS_CERT,
+        'https_key': headphones.HTTPS_KEY,
+        'http_username': headphones.HTTP_USERNAME,
+        'http_password': headphones.HTTP_PASSWORD,
+    })
 
     if headphones.LAUNCH_BROWSER and not args.nolaunch:
-        headphones.launch_browser(headphones.HTTP_HOST, http_port, headphones.HTTP_ROOT)
+        headphones.launch_browser(headphones.HTTP_HOST, http_port,
+            headphones.HTTP_ROOT)
 
     # Start the background threads
     headphones.start()
 
+    # Wait endlessy for a signal to happen
     while True:
         if not headphones.SIGNAL:
             try:
@@ -172,7 +177,8 @@ def main():
             except KeyboardInterrupt:
                 headphones.SIGNAL = 'shutdown'
         else:
-            logger.info('Received signal: ' + headphones.SIGNAL)
+            logger.info('Received signal: %s', headphones.SIGNAL)
+
             if headphones.SIGNAL == 'shutdown':
                 headphones.shutdown()
             elif headphones.SIGNAL == 'restart':
@@ -182,7 +188,6 @@ def main():
 
             headphones.SIGNAL = None
 
-    return
-
+# Call main()
 if __name__ == "__main__":
     main()
